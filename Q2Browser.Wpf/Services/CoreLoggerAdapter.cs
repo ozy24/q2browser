@@ -25,3 +25,6 @@ public class CoreLoggerAdapter : ILogger
     }
 }
 
+
+
+

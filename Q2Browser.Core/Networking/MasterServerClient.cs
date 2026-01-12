@@ -49,7 +49,7 @@ public class MasterServerClient
             var packet = PacketHeader.PrependOobHeader(query);
             
             _logger?.LogDebug($"Sending query packet ({packet.Length} bytes)");
-            await client.SendAsync(packet, packet.Length, masterServerEndPoint);
+            await client.SendAsync(packet, packet.Length, masterServerEndPoint).ConfigureAwait(false);
             _logger?.LogDebug("Query packet sent, waiting for response...");
 
             var receivedData = new List<byte>();
@@ -67,7 +67,7 @@ public class MasterServerClient
                     // Use Task.WhenAny to implement timeout
                     var receiveTask = client.ReceiveAsync();
                     var timeoutTask = Task.Delay(endTime - DateTime.UtcNow, cancellationToken);
-                    var completedTask = await Task.WhenAny(receiveTask, timeoutTask);
+                    var completedTask = await Task.WhenAny(receiveTask, timeoutTask).ConfigureAwait(false);
 
                     if (completedTask == timeoutTask)
                     {
@@ -78,7 +78,7 @@ public class MasterServerClient
                     if (completedTask != receiveTask)
                         continue;
 
-                    var result = await receiveTask;
+                    var result = await receiveTask.ConfigureAwait(false);
                     var data = result.Buffer;
                     packetCount++;
 

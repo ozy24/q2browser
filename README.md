@@ -1,6 +1,9 @@
-# Quake II Server Browser (Q2Pro Edition)
+# Q2Browser
 
-A high-performance, native Windows desktop application to browse Quake II multiplayer servers. Built with .NET 8 and WPF.
+A high-performance, native Windows desktop application to browse Quake II multiplayer servers (original Quake 2, not re-release). Built with .NET 8 and WPF.
+
+**Author:** ozy  
+**Repository:** https://github.com/ozy24/q2browser
 
 ## Prerequisites
 
@@ -59,14 +62,15 @@ dotnet run --project Q2Browser.Wpf/Q2Browser.Wpf.csproj
 
 ## Configuration
 
-Before launching games, you need to configure the Q2Pro executable path and other settings.
+Before launching games, you need to configure the Quake 2 executable path and other settings.
 
 ### Using the Settings Window
 
 1. **Launch the application** (see [Running the Application](#running-the-application) below)
 2. **Click the "Settings" button** in the main window toolbar
 3. **Configure your settings**:
-   - **Q2Pro Executable**: Click "Browse..." to select your `q2pro.exe` file
+   - **Portable Mode**: Enabled by default - stores settings and favorites in the application directory. Disable to use AppData location.
+   - **Quake 2 Executable**: Click "Browse..." to select your Quake 2 executable (e.g., `quake2.exe`, `q2pro.exe`, `r1q2.exe`, etc.)
    - **Master Server**: Configure HTTP or UDP master server settings
    - **Options**: Enable/disable refresh on startup, LAN broadcast discovery
    - **Advanced**: Adjust concurrent probes and timeout settings
@@ -74,12 +78,22 @@ Before launching games, you need to configure the Q2Pro executable path and othe
 
 ### Settings File Location
 
-Settings are stored in:
-```
-%AppData%\Q2ServerBrowser\settings.json
-```
+Settings and favorites are stored in different locations depending on the **Portable Mode** setting:
 
-**Note**: While you can manually edit this JSON file if needed, it's recommended to use the Settings window in the application UI to avoid configuration errors.
+**Portable Mode (Default - Enabled):**
+- Settings: `settings.json` in the same directory as the executable
+- Favorites: `favorites.json` in the same directory as the executable
+
+**AppData Mode (Portable Mode Disabled):**
+- Settings: `%AppData%\Q2ServerBrowser\settings.json`
+- Favorites: `%AppData%\Q2ServerBrowser\favorites.json`
+
+**Note**: 
+- Portable mode is enabled by default, making it easy to keep all application data with the executable
+- You can switch between modes in the Settings window
+- When switching modes, the old files are preserved (not deleted) in case you want to switch back
+- While you can manually edit the JSON files if needed, it's recommended to use the Settings window in the application UI to avoid configuration errors
+- **Log Level**: The `LogLevel` setting (Debug, Info, Warning, Error) is only configurable via the settings.json file. Default is "Info". Set to "Debug" for detailed troubleshooting logs.
 
 ## Running the Application
 
@@ -92,7 +106,7 @@ Settings are stored in:
 
 3. **Search** for servers by name, map, or mod using the search box
 
-4. **Double-click a server** or select it and click "Connect" to launch Q2Pro
+4. **Double-click a server** or select it and click "Connect" to launch your configured Quake 2 executable
 
 5. **Toggle favorites** by selecting a server and clicking "Toggle Favorite"
 
@@ -106,11 +120,17 @@ Q2Browser.sln
 │   ├── Protocol/           # PacketHeader, Q2ColorParser, ByteReader
 │   └── Services/           # FavoritesService
 │
-└── Q2Browser.Wpf/          # WPF application
-    ├── ViewModels/         # MainViewModel, ServerRowViewModel
-    ├── Views/             # MainWindow.xaml
-    ├── Converters/        # Q2ColorToBrushConverter
-    └── Services/          # LauncherService
+├── Q2Browser.Wpf/          # WPF application
+│   ├── ViewModels/         # MainViewModel, ServerRowViewModel
+│   ├── Views/             # MainWindow.xaml
+│   ├── Converters/        # Q2ColorToBrushConverter
+│   └── Services/          # LauncherService
+│
+└── Q2Browser.Core.Tests/   # Unit tests
+    ├── UrlValidatorTests.cs
+    ├── PacketHeaderTests.cs
+    ├── ByteReaderTests.cs
+    └── SettingsTests.cs
 ```
 
 ## Features
@@ -120,7 +140,7 @@ Q2Browser.sln
 - ✅ Real-time server list updates (non-blocking UI)
 - ✅ Search and filter servers
 - ✅ Favorites persistence
-- ✅ Direct launch Q2Pro with server connection
+- ✅ Direct launch Quake 2 executable with server connection
 - ✅ Quake II color code support (^1, ^2, etc.)
 - ✅ Virtualized UI for smooth scrolling through hundreds of servers
 
@@ -133,7 +153,7 @@ Q2Browser.sln
 
 ### Runtime Issues
 
-- **Q2Pro not launching**: Check that `Q2ProExecutablePath` in settings.json points to a valid executable
+- **Quake 2 executable not launching**: Check that `Q2ProExecutablePath` in settings.json points to a valid Quake 2 executable (quake2.exe, q2pro.exe, r1q2.exe, etc.)
 - **No servers found**: Check your internet connection and firewall settings (UDP port 27900)
 - **UI freezes during refresh**: This shouldn't happen due to throttled updates, but if it does, reduce `MaxConcurrentProbes` in settings
 
@@ -143,6 +163,7 @@ Q2Browser.sln
 - Server probing is throttled to 75 concurrent requests by default to prevent router packet loss
 - UI updates are batched every 150ms to prevent thread saturation
 - All networking operations are fully async and non-blocking
+- Comprehensive unit tests (61 tests) covering protocol parsing, validation, and core functionality
 
 ## License
 

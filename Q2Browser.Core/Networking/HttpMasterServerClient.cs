@@ -6,11 +6,12 @@ using Q2Browser.Core.Services;
 
 namespace Q2Browser.Core.Networking;
 
-public class HttpMasterServerClient
+public class HttpMasterServerClient : IDisposable
 {
     private readonly Settings _settings;
     private readonly ILogger? _logger;
     private readonly HttpClient _httpClient;
+    private bool _disposed;
 
     public HttpMasterServerClient(Settings settings, ILogger? logger = null)
     {
@@ -32,17 +33,24 @@ public class HttpMasterServerClient
             return servers;
         }
 
+        // Validate URL format and scheme
+        if (!UrlValidator.IsValidHttpUrl(_settings.HttpMasterServerUrl))
+        {
+            _logger?.LogError($"Invalid HTTP master server URL: {_settings.HttpMasterServerUrl}");
+            return servers;
+        }
+
         try
         {
             _logger?.LogInfo($"Fetching server list from HTTP master: {_settings.HttpMasterServerUrl}");
 
-            var response = await _httpClient.GetAsync(_settings.HttpMasterServerUrl, cancellationToken);
+            var response = await _httpClient.GetAsync(_settings.HttpMasterServerUrl, cancellationToken).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
 
             var contentType = response.Content.Headers.ContentType?.MediaType ?? "";
             _logger?.LogDebug($"Response Content-Type: {contentType}");
 
-            var data = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+            var data = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
             _logger?.LogInfo($"Received {data.Length} bytes from HTTP master server");
 
             // q2servers.com returns binary format directly (6-byte chunks: 4-byte IP + 2-byte port)
@@ -114,6 +122,13 @@ public class HttpMasterServerClient
         // Parse 6-byte blocks (4-byte IP + 2-byte port)
         while (offset + chunkSize <= data.Length)
         {
+            // Additional bounds check before parsing
+            if (offset < 0 || offset + chunkSize > data.Length)
+            {
+                _logger?.LogWarning($"Invalid offset {offset} or chunk size {chunkSize} for data length {data.Length}");
+                break;
+            }
+
             var serverEndPoint = ByteReader.ParseServerAddress(data, offset);
             if (serverEndPoint != null)
             {
@@ -123,6 +138,15 @@ public class HttpMasterServerClient
         }
 
         return servers;
+    }
+
+    public void Dispose()
+    {
+        if (!_disposed)
+        {
+            _httpClient?.Dispose();
+            _disposed = true;
+        }
     }
 }
 

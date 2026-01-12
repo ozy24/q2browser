@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:converters="clr-namespace:Q2Browser.Wpf.Converters"
         mc:Ignorable="d"
-        Title="Settings" Height="550" Width="550"
+        Title="Settings" Height="690" Width="550"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize">
     <Window.Resources>
@@ -47,12 +47,15 @@
             <!-- Options -->
             <GroupBox Header="Options" Margin="0,0,0,15">
                 <StackPanel Margin="10">
-                    <CheckBox Content="Refresh servers on startup" IsChecked="{Binding RefreshOnStartup}" Margin="0,0,0,10"/>
+                    <CheckBox Content="Portable mode (store settings in application directory)" IsChecked="{Binding PortableMode}" Margin="0,0,0,10"/>
+                    <TextBlock Text="When enabled, settings and favorites are stored alongside the executable. When disabled, they are stored in AppData." 
+                               FontStyle="Italic" FontSize="10" Foreground="Gray" Margin="0,0,0,10" TextWrapping="Wrap"/>
+                    <CheckBox Content="Refresh servers on startup" IsChecked="{Binding RefreshOnStartup}" Margin="0,5,0,0"/>
                 </StackPanel>
             </GroupBox>
 
             <!-- Q2Pro Settings -->
-            <GroupBox Header="Q2Pro Executable" Margin="0,0,0,15">
+            <GroupBox Header="Quake 2 Executable (quake2.exe, q2pro.exe, r1q2.exe)" Margin="0,0,0,15">
                 <StackPanel Margin="10">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="Path:" Width="120" VerticalAlignment="Center"/>

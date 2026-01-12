@@ -18,7 +18,7 @@ using Q2Browser.Wpf.Services;
 
 namespace Q2Browser.Wpf.ViewModels;
 
-public class MainViewModel : INotifyPropertyChanged
+public class MainViewModel : INotifyPropertyChanged, IDisposable
 {
     private MasterServerClient? _masterServerClient;
     private HttpMasterServerClient? _httpMasterServerClient;
@@ -27,7 +27,6 @@ public class MainViewModel : INotifyPropertyChanged
     private readonly FavoritesService _favoritesService;
     private LauncherService? _launcherService;
     private readonly ThrottledObservableCollection<ServerRowViewModel> _servers;
-    private readonly ObservableCollection<ServerRowViewModel> _filteredServers;
     private readonly ListCollectionView _serversView;
     private readonly ObservableCollection<PlayerInfo> _players = new();
     private readonly ListCollectionView _playersView;
@@ -40,67 +39,54 @@ public class MainViewModel : INotifyPropertyChanged
     private int _serversFound;
     private CancellationTokenSource? _refreshCancellation;
     private bool _isInitialized;
+    private bool _showDiagnosticsButton;
 
     public MainViewModel()
     {
-        _favoritesService = new FavoritesService();
+        var logger = new CoreLoggerAdapter();
+        _favoritesService = new FavoritesService(logger);
         _servers = new ThrottledObservableCollection<ServerRowViewModel>(150);
-        _filteredServers = new ObservableCollection<ServerRowViewModel>();
         
-        // Create a ListCollectionView for sorting
-        _serversView = new ListCollectionView(_filteredServers);
+        // Create a ListCollectionView for sorting and filtering
+        _serversView = new ListCollectionView(_servers);
         
-        // Set default sort: player count descending
-        var sortDescription = new SortDescription("CurrentPlayers", ListSortDirection.Descending);
-        _serversView.SortDescriptions.Add(sortDescription);
+        // Set default sort: favorites first, then by player count descending
+        _serversView.SortDescriptions.Add(new SortDescription("IsFavorite", ListSortDirection.Descending));
+        _serversView.SortDescriptions.Add(new SortDescription("CurrentPlayers", ListSortDirection.Descending));
+        
+        // Initialize filter (initially no filter - shows all servers)
+        UpdateFilter();
         
         // Create a ListCollectionView for players with sorting by score descending
         _playersView = new ListCollectionView(_players);
         var playerSortDescription = new SortDescription("Score", ListSortDirection.Descending);
         _playersView.SortDescriptions.Add(playerSortDescription);
         
-        _servers.CollectionChanged += (s, e) =>
-        {
-            if (e.NewItems != null)
-            {
-                foreach (ServerRowViewModel item in e.NewItems)
-                {
-                    if (ShouldIncludeInFilter(item))
-                    {
-                        _filteredServers.Add(item);
-                    }
-                }
-            }
-            if (e.OldItems != null)
-            {
-                foreach (ServerRowViewModel item in e.OldItems)
-                {
-                    _filteredServers.Remove(item);
-                }
-            }
-        };
-        
         RefreshCommand = new RelayCommand(async _ => await RefreshServersAsync(), _ => !IsRefreshing && _isInitialized);
         ConnectCommand = new RelayCommand(ConnectToServer, _ => SelectedServer != null);
-        ToggleFavoriteCommand = new RelayCommand(ToggleFavorite, _ => SelectedServer != null);
+        ToggleFavoriteCommand = new RelayCommand(async _ => await ToggleFavoriteAsync(), _ => SelectedServer != null);
         OpenSettingsCommand = new RelayCommand(_ => OpenSettings());
         OpenDiagnosticsCommand = new RelayCommand(_ => OpenDiagnostics());
+        OpenAboutCommand = new RelayCommand(_ => OpenAbout());
         CopyServerNameCommand = new RelayCommand(CopyServerName, _ => SelectedServer != null);
         CopyIpAddressCommand = new RelayCommand(CopyIpAddress, _ => SelectedServer != null);
+        CopyServerDetailsCommand = new RelayCommand(CopyServerDetails, _ => SelectedServer != null);
         
-        _ = InitializeAsync();
+        // Initialize asynchronously with proper error handling
+        _ = InitializeAsync().ContinueWith(task =>
+        {
+            if (task.IsFaulted && task.Exception != null)
+            {
+                DiagnosticLogger.Instance.LogError($"Initialization failed: {task.Exception.GetBaseException().Message}", 
+                    task.Exception.ToString());
+                System.Windows.Application.Current.Dispatcher.Invoke(() =>
+                {
+                    StatusText = $"Initialization error: {task.Exception.GetBaseException().Message}";
+                });
+            }
+        }, TaskContinuationOptions.OnlyOnFaulted);
     }
 
-    private bool ShouldIncludeInFilter(ServerRowViewModel server)
-    {
-        if (string.IsNullOrWhiteSpace(SearchText))
-            return true;
-
-        var searchLower = SearchText.ToLowerInvariant();
-        return server.Hostname.ToLowerInvariant().Contains(searchLower) ||
-               server.Map.ToLowerInvariant().Contains(searchLower) ||
-               server.Mod.ToLowerInvariant().Contains(searchLower);
-    }
 
     private async Task InitializeAsync()
     {
@@ -109,6 +95,9 @@ public class MainViewModel : INotifyPropertyChanged
         
         _currentSettings = await _favoritesService.LoadSettingsAsync();
         DiagnosticLogger.Instance.LogInfo($"Loaded settings: Master={_currentSettings.MasterServerAddress}:{_currentSettings.MasterServerPort}");
+        
+        // Update diagnostics button visibility based on log level
+        UpdateDiagnosticsButtonVisibility();
         
         _masterServerClient = new MasterServerClient(_currentSettings, logger);
         _httpMasterServerClient = new HttpMasterServerClient(_currentSettings, logger);
@@ -131,7 +120,14 @@ public class MainViewModel : INotifyPropertyChanged
             if (_currentSettings.RefreshOnStartup)
             {
                 StatusText = "Ready - Auto-refreshing servers...";
-                _ = RefreshServersAsync();
+                _ = RefreshServersAsync().ContinueWith(task =>
+                {
+                    if (task.IsFaulted && task.Exception != null)
+                    {
+                        DiagnosticLogger.Instance.LogError($"Auto-refresh failed: {task.Exception.GetBaseException().Message}", 
+                            task.Exception.ToString());
+                    }
+                }, TaskContinuationOptions.OnlyOnFaulted);
             }
             else
             {
@@ -146,11 +142,25 @@ public class MainViewModel : INotifyPropertyChanged
     {
         var logger = new CoreLoggerAdapter();
         _currentSettings = await _favoritesService.LoadSettingsAsync();
+        
+        // Dispose old HTTP client before creating new one
+        _httpMasterServerClient?.Dispose();
+        
         _masterServerClient = new MasterServerClient(_currentSettings, logger);
         _httpMasterServerClient = new HttpMasterServerClient(_currentSettings, logger);
         _lanBroadcastClient = new LanBroadcastClient(_currentSettings, logger);
         _gameServerProbe = new GameServerProbe(_currentSettings, logger);
         _launcherService = new LauncherService(_currentSettings);
+        
+        // Update diagnostics button visibility
+        UpdateDiagnosticsButtonVisibility();
+    }
+
+    private void UpdateDiagnosticsButtonVisibility()
+    {
+        // Show diagnostics button only if log level is Debug or Info (for troubleshooting)
+        // Hidden by default (when log level is Warning or Error)
+        ShowDiagnosticsButton = _currentSettings.LogLevel == "Debug" || _currentSettings.LogLevel == "Info";
     }
 
     private void OpenSettings()
@@ -192,6 +202,15 @@ public class MainViewModel : INotifyPropertyChanged
         }
     }
 
+    private void OpenAbout()
+    {
+        var aboutWindow = new Views.AboutWindow
+        {
+            Owner = System.Windows.Application.Current.MainWindow
+        };
+        aboutWindow.ShowDialog();
+    }
+
     public ICollectionView Servers => _serversView;
 
     private ServerRowViewModel? _selectedServer;
@@ -202,13 +221,53 @@ public class MainViewModel : INotifyPropertyChanged
         {
             if (_selectedServer != value)
             {
+                // Unsubscribe from old server's property changes
+                if (_selectedServer != null)
+                {
+                    _selectedServer.PropertyChanged -= SelectedServer_PropertyChanged;
+                }
+                
                 _selectedServer = value;
+                
+                // Subscribe to new server's property changes
+                if (_selectedServer != null)
+                {
+                    _selectedServer.PropertyChanged += SelectedServer_PropertyChanged;
+                }
+                
                 OnPropertyChanged();
+                OnPropertyChanged(nameof(ToggleFavoriteText));
+                OnPropertyChanged(nameof(ToggleFavoriteMenuText));
                 UpdatePlayers();
                 ((RelayCommand)ConnectCommand).RaiseCanExecuteChanged();
                 ((RelayCommand)ToggleFavoriteCommand).RaiseCanExecuteChanged();
                 ((RelayCommand)CopyServerNameCommand).RaiseCanExecuteChanged();
                 ((RelayCommand)CopyIpAddressCommand).RaiseCanExecuteChanged();
+                ((RelayCommand)CopyServerDetailsCommand).RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    private void SelectedServer_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(ServerRowViewModel.IsFavorite))
+        {
+            OnPropertyChanged(nameof(ToggleFavoriteText));
+        }
+    }
+
+    public string ToggleFavoriteText => SelectedServer?.IsFavorite == true ? "Unfavorite" : "Favorite";
+    public string ToggleFavoriteMenuText => SelectedServer?.IsFavorite == true ? "Remove from Favorites" : "Add to Favorites";
+
+    public bool ShowDiagnosticsButton
+    {
+        get => _showDiagnosticsButton;
+        set
+        {
+            if (_showDiagnosticsButton != value)
+            {
+                _showDiagnosticsButton = value;
+                OnPropertyChanged();
             }
         }
     }
@@ -224,7 +283,7 @@ public class MainViewModel : INotifyPropertyChanged
             {
                 _searchText = value;
                 OnPropertyChanged();
-                FilterServers();
+                UpdateFilter();
             }
         }
     }
@@ -274,8 +333,10 @@ public class MainViewModel : INotifyPropertyChanged
     public ICommand ToggleFavoriteCommand { get; }
     public ICommand OpenSettingsCommand { get; }
     public ICommand OpenDiagnosticsCommand { get; }
+    public ICommand OpenAboutCommand { get; }
     public ICommand CopyServerNameCommand { get; }
     public ICommand CopyIpAddressCommand { get; }
+    public ICommand CopyServerDetailsCommand { get; }
 
     private async Task RefreshServersAsync()
     {
@@ -286,7 +347,6 @@ public class MainViewModel : INotifyPropertyChanged
         IsRefreshing = true;
         StatusText = "Querying master server...";
         _servers.Clear();
-        _filteredServers.Clear();
         ServersFound = 0;
 
         try
@@ -361,7 +421,6 @@ public class MainViewModel : INotifyPropertyChanged
             );
 
             StatusText = $"Found {ServersFound} active servers";
-            FilterServers();
         }
         catch (OperationCanceledException)
         {
@@ -377,29 +436,25 @@ public class MainViewModel : INotifyPropertyChanged
         }
     }
 
-    private void FilterServers()
+    private void UpdateFilter()
     {
-        _filteredServers.Clear();
-        
         if (string.IsNullOrWhiteSpace(SearchText))
         {
-            foreach (var server in _servers)
-            {
-                _filteredServers.Add(server);
-            }
+            _serversView.Filter = null;
         }
         else
         {
             var searchLower = SearchText.ToLowerInvariant();
-            foreach (var server in _servers)
+            _serversView.Filter = item =>
             {
-                if (server.Hostname.ToLowerInvariant().Contains(searchLower) ||
-                    server.Map.ToLowerInvariant().Contains(searchLower) ||
-                    server.Mod.ToLowerInvariant().Contains(searchLower))
+                if (item is ServerRowViewModel server)
                 {
-                    _filteredServers.Add(server);
+                    return server.Hostname.ToLowerInvariant().Contains(searchLower) ||
+                           server.Map.ToLowerInvariant().Contains(searchLower) ||
+                           server.Mod.ToLowerInvariant().Contains(searchLower);
                 }
-            }
+                return false;
+            };
         }
     }
 
@@ -438,7 +493,7 @@ public class MainViewModel : INotifyPropertyChanged
         }
     }
 
-    private async void ToggleFavorite(object? parameter)
+    private async Task ToggleFavoriteAsync()
     {
         if (SelectedServer == null) return;
 
@@ -453,7 +508,18 @@ public class MainViewModel : INotifyPropertyChanged
             _favoriteAddresses.Remove(SelectedServer.FullAddress);
         }
 
-        await _favoritesService.SaveFavoritesAsync(_favoriteAddresses.ToList());
+        try
+        {
+            await _favoritesService.SaveFavoritesAsync(_favoriteAddresses.ToList(), _currentSettings.PortableMode);
+        }
+        catch (Exception ex)
+        {
+            DiagnosticLogger.Instance.LogError($"Failed to save favorites: {ex.Message}", ex.ToString());
+            // Continue execution - favorites are still in memory
+        }
+        
+        // Refresh the view to update sorting
+        _serversView.Refresh();
     }
 
     private void CopyServerName(object? parameter)
@@ -488,6 +554,29 @@ public class MainViewModel : INotifyPropertyChanged
         }
     }
 
+    private void CopyServerDetails(object? parameter)
+    {
+        if (SelectedServer == null) return;
+        
+        try
+        {
+            var details = $"Server Name: {SelectedServer.Hostname}\n" +
+                         $"Address: {SelectedServer.FullAddress}\n" +
+                         $"Map: {SelectedServer.Map}\n" +
+                         $"Mod: {SelectedServer.Mod}\n" +
+                         $"Players: {SelectedServer.PlayersText}\n" +
+                         $"Ping: {SelectedServer.PingText}";
+            
+            Clipboard.SetText(details);
+            StatusText = "Copied server details to clipboard";
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Error copying server details: {ex.Message}";
+            DiagnosticLogger.Instance.LogError($"Error copying server details: {ex.Message}", ex.ToString());
+        }
+    }
+
     public event PropertyChangedEventHandler? PropertyChanged;
 
     private void UpdatePlayers()
@@ -505,6 +594,27 @@ public class MainViewModel : INotifyPropertyChanged
     protected virtual void OnPropertyChanged([CallerMemberName] string? propertyName = null)
     {
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    }
+
+    public void Dispose()
+    {
+        // Dispose HTTP client
+        _httpMasterServerClient?.Dispose();
+        
+        // Dispose game server probe (and its semaphore)
+        _gameServerProbe?.Dispose();
+        
+        // Dispose throttled collection (and its timer)
+        _servers?.Dispose();
+        
+        // Dispose cancellation token source
+        _refreshCancellation?.Dispose();
+        
+        // Unsubscribe from selected server events
+        if (_selectedServer != null)
+        {
+            _selectedServer.PropertyChanged -= SelectedServer_PropertyChanged;
+        }
     }
 }
 
@@ -550,4 +660,5 @@ public class RelayCommand : ICommand
         CanExecuteChanged?.Invoke(this, EventArgs.Empty);
     }
 }
+
 

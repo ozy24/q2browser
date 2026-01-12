@@ -1,24 +1,61 @@
+using System;
+using System.IO;
+using System.Reflection;
 using System.Text.Json;
 using Q2Browser.Core.Models;
+using Q2Browser.Core.Protocol;
 
 namespace Q2Browser.Core.Services;
 
 public class FavoritesService
 {
-    private readonly string _favoritesPath;
+    private string _favoritesPath = string.Empty;
+    private string _settingsPath = string.Empty;
     private readonly JsonSerializerOptions _jsonOptions;
+    private readonly ILogger? _logger;
 
-    public FavoritesService()
+    public FavoritesService(ILogger? logger = null)
     {
-        var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        var configDir = Path.Combine(appDataPath, "Q2ServerBrowser");
-        Directory.CreateDirectory(configDir);
-        _favoritesPath = Path.Combine(configDir, "favorites.json");
-        
+        _logger = logger;
         _jsonOptions = new JsonSerializerOptions
         {
             WriteIndented = true
         };
+        
+        // Initialize paths - will be updated after settings are loaded
+        UpdatePaths(portableMode: true);
+    }
+
+    private void UpdatePaths(bool portableMode)
+    {
+        if (portableMode)
+        {
+            // Portable mode: use exe directory
+            var exePath = Assembly.GetEntryAssembly()?.Location;
+            if (string.IsNullOrEmpty(exePath))
+            {
+                // Fallback if entry assembly is not available
+                exePath = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
+            }
+            
+            if (!string.IsNullOrEmpty(exePath))
+            {
+                var exeDir = Path.GetDirectoryName(exePath);
+                if (!string.IsNullOrEmpty(exeDir))
+                {
+                    _favoritesPath = Path.Combine(exeDir, "favorites.json");
+                    _settingsPath = Path.Combine(exeDir, "settings.json");
+                    return;
+                }
+            }
+        }
+        
+        // AppData mode (fallback or explicit)
+        var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        var configDir = Path.Combine(appDataPath, "Q2ServerBrowser");
+        Directory.CreateDirectory(configDir);
+        _favoritesPath = Path.Combine(configDir, "favorites.json");
+        _settingsPath = Path.Combine(configDir, "settings.json");
     }
 
     public async Task<List<string>> LoadFavoritesAsync()
@@ -28,66 +65,157 @@ public class FavoritesService
 
         try
         {
-            var json = await File.ReadAllTextAsync(_favoritesPath);
+            var json = await File.ReadAllTextAsync(_favoritesPath).ConfigureAwait(false);
             var favorites = JsonSerializer.Deserialize<List<string>>(json, _jsonOptions);
             return favorites ?? new List<string>();
         }
-        catch
+        catch (Exception ex)
         {
+            _logger?.LogError($"Failed to load favorites from {_favoritesPath}: {ex.Message}", ex.StackTrace);
             return new List<string>();
         }
     }
 
-    public async Task SaveFavoritesAsync(List<string> favorites)
+    public async Task SaveFavoritesAsync(List<string> favorites, bool? portableMode = null)
     {
+        // Update paths if portable mode is specified
+        if (portableMode.HasValue)
+        {
+            UpdatePaths(portableMode.Value);
+        }
+        
+        // Ensure directory exists
+        var favoritesDir = Path.GetDirectoryName(_favoritesPath);
+        if (!string.IsNullOrEmpty(favoritesDir) && !Directory.Exists(favoritesDir))
+        {
+            Directory.CreateDirectory(favoritesDir);
+        }
+        
         try
         {
             var json = JsonSerializer.Serialize(favorites, _jsonOptions);
-            await File.WriteAllTextAsync(_favoritesPath, json);
+            await File.WriteAllTextAsync(_favoritesPath, json).ConfigureAwait(false);
         }
-        catch
+        catch (Exception ex)
         {
-            // Log error if needed
+            _logger?.LogError($"Failed to save favorites to {_favoritesPath}: {ex.Message}", ex.StackTrace);
+            throw; // Re-throw to allow caller to handle
         }
     }
 
     public async Task<Settings> LoadSettingsAsync()
     {
-        var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        var configDir = Path.Combine(appDataPath, "Q2ServerBrowser");
-        var settingsPath = Path.Combine(configDir, "settings.json");
+        // Try portable location first, then AppData
+        var portableSettingsPath = GetPortableSettingsPath();
+        var appDataSettingsPath = GetAppDataSettingsPath();
         
-        if (!File.Exists(settingsPath))
-            return new Settings();
+        string? settingsPath = null;
+        
+        if (File.Exists(portableSettingsPath))
+        {
+            settingsPath = portableSettingsPath;
+        }
+        else if (File.Exists(appDataSettingsPath))
+        {
+            settingsPath = appDataSettingsPath;
+        }
+        
+        if (settingsPath == null)
+        {
+            // No settings file found, return defaults (portable mode = true)
+            var defaultSettings = new Settings();
+            UpdatePaths(defaultSettings.PortableMode);
+            return defaultSettings;
+        }
 
         try
         {
             var json = await File.ReadAllTextAsync(settingsPath);
             var settings = JsonSerializer.Deserialize<Settings>(json, _jsonOptions);
-            return settings ?? new Settings();
+            
+            if (settings == null)
+            {
+                var defaultSettings = new Settings();
+                UpdatePaths(defaultSettings.PortableMode);
+                return defaultSettings;
+            }
+            
+            // Update paths based on loaded settings
+            UpdatePaths(settings.PortableMode);
+            
+            // Validate and fix invalid URLs if present
+            if (!string.IsNullOrWhiteSpace(settings.HttpMasterServerUrl) && !UrlValidator.IsValidHttpUrl(settings.HttpMasterServerUrl))
+            {
+                _logger?.LogWarning($"Invalid URL in settings file, resetting to default: {settings.HttpMasterServerUrl}");
+                // Reset to default if invalid
+                settings.HttpMasterServerUrl = "http://q2servers.com/?raw=2";
+            }
+            
+            return settings;
         }
-        catch
+        catch (Exception ex)
         {
-            return new Settings();
+            _logger?.LogError($"Failed to load settings from {settingsPath}: {ex.Message}", ex.StackTrace);
+            var defaultSettings = new Settings();
+            UpdatePaths(defaultSettings.PortableMode);
+            return defaultSettings;
         }
+    }
+
+    private static string GetPortableSettingsPath()
+    {
+        var exePath = Assembly.GetEntryAssembly()?.Location;
+        if (string.IsNullOrEmpty(exePath))
+        {
+            exePath = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
+        }
+        
+        if (!string.IsNullOrEmpty(exePath))
+        {
+            var exeDir = Path.GetDirectoryName(exePath);
+            if (!string.IsNullOrEmpty(exeDir))
+            {
+                return Path.Combine(exeDir, "settings.json");
+            }
+        }
+        
+        return string.Empty;
+    }
+
+    private static string GetAppDataSettingsPath()
+    {
+        var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        var configDir = Path.Combine(appDataPath, "Q2ServerBrowser");
+        return Path.Combine(configDir, "settings.json");
     }
 
     public async Task SaveSettingsAsync(Settings settings)
     {
-        var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        var configDir = Path.Combine(appDataPath, "Q2ServerBrowser");
-        Directory.CreateDirectory(configDir);
-        var settingsPath = Path.Combine(configDir, "settings.json");
+        // Update paths based on portable mode setting
+        UpdatePaths(settings.PortableMode);
+        
+        // Ensure directory exists
+        var settingsDir = Path.GetDirectoryName(_settingsPath);
+        if (!string.IsNullOrEmpty(settingsDir) && !Directory.Exists(settingsDir))
+        {
+            Directory.CreateDirectory(settingsDir);
+        }
         
         try
         {
             var json = JsonSerializer.Serialize(settings, _jsonOptions);
-            await File.WriteAllTextAsync(settingsPath, json);
+            await File.WriteAllTextAsync(_settingsPath, json).ConfigureAwait(false);
+            
+            // If switching modes, optionally clean up old location
+            // (We'll leave the old file in case user wants to switch back)
         }
-        catch
+        catch (Exception ex)
         {
-            // Log error if needed
+            _logger?.LogError($"Failed to save settings to {_settingsPath}: {ex.Message}", ex.StackTrace);
+            throw; // Re-throw to allow caller to handle
         }
     }
 }
+
+
 

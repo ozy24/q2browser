@@ -41,7 +41,7 @@ public class LanBroadcastClient
             var broadcastEndPoint = new IPEndPoint(IPAddress.Broadcast, 27910); // PORT_SERVER
 
             _logger?.LogDebug($"Sending broadcast to {broadcastEndPoint}");
-            await client.SendAsync(packet, packet.Length, broadcastEndPoint);
+            await client.SendAsync(packet, packet.Length, broadcastEndPoint).ConfigureAwait(false);
 
             var endTime = DateTime.UtcNow.AddSeconds(3);
             var discoveredAddresses = new HashSet<string>();
@@ -52,12 +52,12 @@ public class LanBroadcastClient
                 {
                     var timeoutTask = Task.Delay(endTime - DateTime.UtcNow, cancellationToken);
                     var receiveTask = client.ReceiveAsync();
-                    var completedTask = await Task.WhenAny(receiveTask, timeoutTask);
+                    var completedTask = await Task.WhenAny(receiveTask, timeoutTask).ConfigureAwait(false);
 
                     if (completedTask == timeoutTask)
                         break;
 
-                    var result = await receiveTask;
+                    var result = await receiveTask.ConfigureAwait(false);
                     var addressKey = $"{result.RemoteEndPoint.Address}:{result.RemoteEndPoint.Port}";
 
                     if (discoveredAddresses.Contains(addressKey))
@@ -83,4 +83,7 @@ public class LanBroadcastClient
         return servers;
     }
 }
+
+
+
 

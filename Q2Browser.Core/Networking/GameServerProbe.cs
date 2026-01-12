@@ -9,11 +9,12 @@ using Q2Browser.Core.Services;
 
 namespace Q2Browser.Core.Networking;
 
-public class GameServerProbe
+public class GameServerProbe : IDisposable
 {
     private readonly Settings _settings;
     private readonly SemaphoreSlim _semaphore;
     private readonly ILogger? _logger;
+    private bool _disposed;
 
     public GameServerProbe(Settings settings, ILogger? logger = null)
     {
@@ -24,11 +25,14 @@ public class GameServerProbe
 
     public async Task<ServerEntry?> ProbeServerAsync(IPEndPoint endPoint, CancellationToken cancellationToken = default)
     {
-        await _semaphore.WaitAsync(cancellationToken);
+        if (_disposed)
+            throw new ObjectDisposedException(nameof(GameServerProbe));
+            
+        await _semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
         
         try
         {
-            return await ProbeServerInternalAsync(endPoint, cancellationToken);
+            return await ProbeServerInternalAsync(endPoint, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -48,11 +52,37 @@ public class GameServerProbe
             var packet = PacketHeader.PrependOobHeader(query);
 
             var startTime = DateTime.UtcNow;
-            await client.SendAsync(packet, packet.Length, endPoint);
+            await client.SendAsync(packet, packet.Length, endPoint).ConfigureAwait(false);
             _logger?.LogDebug($"Probing server {endPoint}");
 
-            // Receive response
-            var result = await client.ReceiveAsync();
+            // Receive response with timeout using Task.WhenAny
+            UdpReceiveResult result;
+            try
+            {
+                var receiveTask = client.ReceiveAsync();
+                var timeoutTask = Task.Delay(_settings.ProbeTimeoutMs, cancellationToken);
+                var completedTask = await Task.WhenAny(receiveTask, timeoutTask).ConfigureAwait(false);
+
+                if (completedTask == timeoutTask)
+                {
+                    _logger?.LogDebug($"Probe for server {endPoint} timed out after {_settings.ProbeTimeoutMs}ms");
+                    return null;
+                }
+
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    _logger?.LogDebug($"Probe for server {endPoint} was cancelled");
+                    return null;
+                }
+
+                result = await receiveTask.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger?.LogDebug($"Probe for server {endPoint} was cancelled");
+                return null;
+            }
+            
             var elapsed = (int)(DateTime.UtcNow - startTime).TotalMilliseconds;
 
             var data = result.Buffer;
@@ -91,13 +121,17 @@ public class GameServerProbe
         }
     }
 
+    /// <summary>
+    /// Parses a Quake II server status response.
+    /// Format after OOB header removal: "print\n\infostring\nplayerlist"
+    /// - The "print\n" prefix is skipped
+    /// - Infostring format: \key\value\key\value... (backslash-delimited key-value pairs)
+    /// - Player list format: score ping "name"\n (one per line)
+    /// </summary>
+    /// <param name="response">The status response string (OOB header already removed)</param>
+    /// <param name="serverEntry">The server entry to populate with parsed data</param>
     private void ParseStatusResponse(string response, ServerEntry serverEntry)
     {
-        // Quake 2 status response format:
-        // Response after OOB header removal: "print\n\infostring\nplayerlist"
-        // The "print\n" prefix needs to be skipped
-        // Infostring format: \key\value\key\value...
-        // Then: player list lines in format: score ping "name"\n
         
         // Skip "print\n" prefix if present
         var startIndex = 0;
@@ -217,6 +251,9 @@ public class GameServerProbe
         IProgress<ServerEntry> progress,
         CancellationToken cancellationToken = default)
     {
+        if (_disposed)
+            throw new ObjectDisposedException(nameof(GameServerProbe));
+            
         var endPointList = endPoints.ToList();
         _logger?.LogInfo($"Starting to probe {endPointList.Count} server(s) (max concurrent: {_settings.MaxConcurrentProbes})");
         
@@ -225,7 +262,7 @@ public class GameServerProbe
 
         var tasks = endPointList.Select(async endPoint =>
         {
-            var entry = await ProbeServerAsync(endPoint, cancellationToken);
+            var entry = await ProbeServerAsync(endPoint, cancellationToken).ConfigureAwait(false);
             completed++;
             
             if (entry != null)
@@ -242,9 +279,18 @@ public class GameServerProbe
             return entry;
         });
 
-        var results = await Task.WhenAll(tasks);
+        var results = await Task.WhenAll(tasks).ConfigureAwait(false);
         _logger?.LogInfo($"Probing complete: {successful}/{endPointList.Count} servers responded");
         return results.Where(r => r != null).ToList()!;
+    }
+
+    public void Dispose()
+    {
+        if (!_disposed)
+        {
+            _semaphore?.Dispose();
+            _disposed = true;
+        }
     }
 }
 

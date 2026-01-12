@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using System.Windows.Input;
 using Microsoft.Win32;
 using Q2Browser.Core.Models;
+using Q2Browser.Core.Protocol;
 using Q2Browser.Core.Services;
 
 namespace Q2Browser.Wpf.ViewModels;
@@ -16,7 +17,9 @@ public class SettingsViewModel : INotifyPropertyChanged
 
     public SettingsViewModel()
     {
-        _favoritesService = new FavoritesService();
+        // Use DiagnosticLogger as adapter for FavoritesService
+        var logger = new Services.CoreLoggerAdapter();
+        _favoritesService = new FavoritesService(logger);
         _settings = new Settings();
         
         SaveCommand = new RelayCommand(async _ => await SaveSettingsAsync());
@@ -35,6 +38,7 @@ public class SettingsViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(HttpMasterServerUrl));
         OnPropertyChanged(nameof(EnableLanBroadcast));
         OnPropertyChanged(nameof(RefreshOnStartup));
+        OnPropertyChanged(nameof(PortableMode));
         OnPropertyChanged(nameof(Q2ProExecutablePath));
         OnPropertyChanged(nameof(MaxConcurrentProbes));
         OnPropertyChanged(nameof(ProbeTimeoutMs));
@@ -89,8 +93,23 @@ public class SettingsViewModel : INotifyPropertyChanged
         {
             if (_settings.HttpMasterServerUrl != value)
             {
-                _settings.HttpMasterServerUrl = value;
-                OnPropertyChanged();
+                // Validate URL if not null/empty - allow setting but validate on save
+                // This allows user to type the URL and see validation feedback when saving
+                try
+                {
+                    _settings.HttpMasterServerUrl = value;
+                    OnPropertyChanged();
+                }
+                catch (ArgumentException ex)
+                {
+                    // Invalid URL format - show error but don't prevent user from editing
+                    // The validation error will be shown when user tries to save
+                    System.Windows.MessageBox.Show(
+                        $"Invalid URL format: {ex.Message}\n\nPlease enter a valid HTTP or HTTPS URL.",
+                        "Invalid URL",
+                        System.Windows.MessageBoxButton.OK,
+                        System.Windows.MessageBoxImage.Warning);
+                }
             }
         }
     }
@@ -116,6 +135,19 @@ public class SettingsViewModel : INotifyPropertyChanged
             if (_settings.RefreshOnStartup != value)
             {
                 _settings.RefreshOnStartup = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    public bool PortableMode
+    {
+        get => _settings.PortableMode;
+        set
+        {
+            if (_settings.PortableMode != value)
+            {
+                _settings.PortableMode = value;
                 OnPropertyChanged();
             }
         }
@@ -186,7 +218,19 @@ public class SettingsViewModel : INotifyPropertyChanged
 
     private async Task SaveSettingsAsync()
     {
-        await _favoritesService.SaveSettingsAsync(_settings);
+        try
+        {
+            await _favoritesService.SaveSettingsAsync(_settings);
+        }
+        catch (Exception ex)
+        {
+            System.Windows.MessageBox.Show(
+                $"Failed to save settings:\n\n{ex.Message}",
+                "Error",
+                System.Windows.MessageBoxButton.OK,
+                System.Windows.MessageBoxImage.Error);
+            throw; // Re-throw to prevent dialog from closing
+        }
     }
 
     public Settings GetSettings() => _settings;

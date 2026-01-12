@@ -7,11 +7,12 @@ using System.Windows.Threading;
 
 namespace Q2Browser.Wpf.ViewModels;
 
-public class ThrottledObservableCollection<T> : ObservableCollection<T>
+public class ThrottledObservableCollection<T> : ObservableCollection<T>, IDisposable
 {
     private readonly DispatcherTimer _updateTimer;
     private readonly Queue<T> _pendingItems = new();
     private readonly object _lockObject = new();
+    private bool _disposed;
 
     public ThrottledObservableCollection(int updateIntervalMs = 150)
     {
@@ -27,6 +28,7 @@ public class ThrottledObservableCollection<T> : ObservableCollection<T>
     {
         lock (_lockObject)
         {
+            if (_disposed) return;
             _pendingItems.Enqueue(item);
         }
     }
@@ -35,7 +37,7 @@ public class ThrottledObservableCollection<T> : ObservableCollection<T>
     {
         lock (_lockObject)
         {
-            if (_pendingItems.Count == 0) return;
+            if (_disposed || _pendingItems.Count == 0) return;
 
             var itemsToAdd = new List<T>();
             while (_pendingItems.Count > 0)
@@ -58,8 +60,23 @@ public class ThrottledObservableCollection<T> : ObservableCollection<T>
 
     public void Stop()
     {
-        _updateTimer.Stop();
-        _updateTimer.Tick -= OnTimerTick;
+        lock (_lockObject)
+        {
+            if (!_disposed)
+            {
+                _updateTimer.Stop();
+                _updateTimer.Tick -= OnTimerTick;
+            }
+        }
+    }
+
+    public void Dispose()
+    {
+        if (!_disposed)
+        {
+            Stop();
+            _disposed = true;
+        }
     }
 }
 

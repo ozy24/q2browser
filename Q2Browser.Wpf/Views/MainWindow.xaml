@@ -6,11 +6,12 @@
         xmlns:vm="clr-namespace:Q2Browser.Wpf.ViewModels"
         xmlns:converters="clr-namespace:Q2Browser.Wpf.Converters"
         mc:Ignorable="d"
-        Title="Quake II Server Browser" Height="600" Width="1000"
+        Title="Q2Browser" Height="600" Width="1000"
         WindowStartupLocation="CenterScreen">
     <Window.Resources>
         <converters:Q2ColorToBrushConverter x:Key="ColorConverter"/>
         <converters:InverseBooleanConverter x:Key="InverseBooleanConverter"/>
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
     </Window.Resources>
     <Grid>
         <Grid.RowDefinitions>
@@ -27,12 +28,14 @@
                     IsEnabled="{Binding IsRefreshing, Converter={StaticResource InverseBooleanConverter}}"/>
             <Button Content="Connect" Command="{Binding ConnectCommand}" 
                     Width="100" Height="30" Margin="0,0,10,0"/>
-            <Button Content="Toggle Favorite" Command="{Binding ToggleFavoriteCommand}" 
-                    Width="120" Height="30" Margin="0,0,10,0"/>
+            <Button Content="{Binding ToggleFavoriteText}" Command="{Binding ToggleFavoriteCommand}" 
+                    Width="100" Height="30" Margin="0,0,10,0"/>
             <Button Content="Settings" Command="{Binding OpenSettingsCommand}" 
                     Width="100" Height="30" Margin="0,0,10,0"/>
+            <Button Content="About" Command="{Binding OpenAboutCommand}" 
+                    Width="100" Height="30" Margin="0,0,10,0"/>
             <Button Content="Diagnostics" Command="{Binding OpenDiagnosticsCommand}" 
-                    Width="100" Height="30"/>
+                    Width="100" Height="30" Visibility="{Binding ShowDiagnosticsButton, Converter={StaticResource BooleanToVisibilityConverter}}"/>
         </StackPanel>
 
         <!-- Search Box -->
@@ -65,17 +68,28 @@
                       PreviewMouseLeftButtonDown="DataGrid_PreviewMouseLeftButtonDown">
                 <DataGrid.ContextMenu>
                     <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                        <MenuItem Header="Copy Server Details" Command="{Binding CopyServerDetailsCommand}"/>
                         <MenuItem Header="Copy Server Name" Command="{Binding CopyServerNameCommand}"/>
                         <MenuItem Header="Copy IP Address" Command="{Binding CopyIpAddressCommand}"/>
+                        <Separator/>
+                        <MenuItem Header="{Binding ToggleFavoriteMenuText}" Command="{Binding ToggleFavoriteCommand}"/>
                     </ContextMenu>
                 </DataGrid.ContextMenu>
+                <DataGrid.RowStyle>
+                    <Style TargetType="DataGridRow">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsFavorite}" Value="True">
+                                <Setter Property="FontWeight" Value="Bold"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </DataGrid.RowStyle>
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="Server Name" Binding="{Binding Hostname, Converter={StaticResource ColorConverter}}" Width="*"/>
                     <DataGridTextColumn Header="Map" Binding="{Binding Map}" Width="120"/>
                     <DataGridTextColumn Header="Mod" Binding="{Binding Mod}" Width="100"/>
                     <DataGridTextColumn Header="Players" Binding="{Binding PlayersText}" Width="80"/>
                     <DataGridTextColumn Header="Ping" Binding="{Binding PingText}" Width="80"/>
-                    <DataGridCheckBoxColumn Header="Favorite" Binding="{Binding IsFavorite}" Width="70"/>
                 </DataGrid.Columns>
             </DataGrid>
 
@@ -100,7 +114,7 @@
                             </Style>
                         </DataGridTextColumn.ElementStyle>
                     </DataGridTextColumn>
-                    <DataGridTextColumn Header="RTT" Binding="{Binding Ping}" Width="50">
+                    <DataGridTextColumn Header="Ping" Binding="{Binding Ping}" Width="50">
                         <DataGridTextColumn.ElementStyle>
                             <Style TargetType="TextBlock">
                                 <Setter Property="HorizontalAlignment" Value="Right"/>

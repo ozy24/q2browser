@@ -8,3 +8,6 @@ public interface ILogger
     void LogDebug(string message, string? details = null);
 }
 
+
+
+

@@ -29,3 +29,5 @@ E:\Projects\q2-server-browser\Q2Browser.Wpf\obj\Debug\net8.0-windows\Views\Setti
 E:\Projects\q2-server-browser\Q2Browser.Wpf\obj\Debug\net8.0-windows\Views\DiagnosticWindow.baml
 E:\Projects\q2-server-browser\Q2Browser.Wpf\obj\Debug\net8.0-windows\Views\DiagnosticWindow.g.cs
 E:\Projects\q2-server-browser\Q2Browser.Wpf\obj\Debug\net8.0-windows\Q2Browser.Wpf.sourcelink.json
+E:\Projects\q2-server-browser\Q2Browser.Wpf\obj\Debug\net8.0-windows\Views\AboutWindow.baml
+E:\Projects\q2-server-browser\Q2Browser.Wpf\obj\Debug\net8.0-windows\Views\AboutWindow.g.cs
