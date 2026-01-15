@@ -11,19 +11,19 @@ A high-performance, native Windows desktop application to browse Quake II multip
 
 ![Server List](img/2.png)
 
-![Settings Window](img/3.png)
-
-![Address Book](img/4.png)
-
-![About Window](img/5.png)
-
 ## Features
 
 - ✅ Query Quake II master servers
 - ✅ Probe individual game servers with throttled concurrent requests
 - ✅ Real-time server list updates (non-blocking UI)
-- ✅ Search and filter servers
+- ✅ Search and filter servers (by name, map, mod, or player names)
+- ✅ View players on selected server (sorted by score)
 - ✅ Favorites persistence
+- ✅ Address Book for manual server entries
+  - Add/edit/delete custom server addresses
+  - Support for IP addresses, hostnames, FQDNs (with or without ports)
+  - Custom labels for easy identification
+  - Add servers from server list directly to address book
 - ✅ Direct launch Quake 2 executable with server connection
 - ✅ Native system theme support (automatically follows Windows dark/light theme via .NET 10 ThemeMode)
 
@@ -49,9 +49,16 @@ A high-performance, native Windows desktop application to browse Quake II multip
    - **Master Server**: Configure HTTP or UDP master server settings (defaults work for most users)
    - **Options**: Enable/disable refresh on startup, LAN broadcast discovery
 3. **Click "Refresh"** to query the master server and discover game servers
-4. **Filter servers** by name, map, or mod using the filter box
-5. **Double-click a server** or select it and click "Connect" to launch Quake 2
-6. **Toggle favorites** by selecting a server and clicking "Toggle Favorite"
+4. **Filter servers** by name, map, mod, or player names using the filter box
+5. **View players** by selecting a server - the players list shows all players currently on the server (sorted by score)
+6. **Double-click a server** or select it and click "Connect" to launch Quake 2
+7. **Toggle favorites** by selecting a server and clicking "Toggle Favorite"
+8. **Use the Address Book** tab to manage custom server entries:
+   - **Add**: Enter an address (IP, hostname, or FQDN with optional port) and an optional label, then click "Add"
+   - **Edit**: Select an entry and click "Edit" to modify the address or label
+   - **Delete**: Select an entry and click "Delete" to remove it
+   - **Connect**: Double-click an entry or select it and click "Connect" to launch Quake 2
+   - **Add from server list**: Select a server from the server list and use "Add to Address Book" (right-click menu or button)
 
 ### Settings
 
@@ -60,16 +67,19 @@ Settings and favorites are stored in different locations depending on the **Port
 **Portable Mode (Default - Enabled):**
 - Settings: `settings.json` in the same directory as the executable
 - Favorites: `favorites.json` in the same directory as the executable
+- Address Book: `addressbook.json` in the same directory as the executable
 
 **AppData Mode (Portable Mode Disabled):**
 - Settings: `%AppData%\Q2Connect\settings.json`
 - Favorites: `%AppData%\Q2Connect\favorites.json`
+- Address Book: `%AppData%\Q2Connect\addressbook.json`
 
 **Notes:**
 - Portable mode is enabled by default, making it easy to keep all application data with the executable
 - You can switch between modes in the Settings window
 - When switching modes, the old files are preserved (not deleted) in case you want to switch back
 - **Log Level**: Controls log verbosity. Default is "Warning" (shows only warnings and errors). Can be configured in Settings → Advanced. Set to "Debug" for detailed troubleshooting logs.
+- **Include Player Names in Search**: When enabled (Settings → Advanced), the search filter will also match player names on servers, making it easy to find servers where specific players are playing
 
 ### Troubleshooting
 
